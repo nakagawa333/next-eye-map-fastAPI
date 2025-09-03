@@ -1,0 +1,6 @@
+fastapi==0.111.0
+fastapi-cli==0.0.3
+pydantic>=1.8.0,<2.0.0
+uvicorn>=0.15.0,<0.16.0
+SQLAlchemy==2.0.43
+psycopg2==2.9.10

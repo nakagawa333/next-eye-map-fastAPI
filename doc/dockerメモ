@@ -1,0 +1,8 @@
+再ビルドを行う
+docker-compose build
+
+コンテナ停止
+docker compose stop
+
+コンテナ生成
+docker compose start
