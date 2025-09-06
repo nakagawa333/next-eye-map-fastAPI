@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 import uvicorn
 
-from app.router import stores
+from app.routers import stores
 from database import Base,engine
 
 app =FastAPI()
