@@ -11,6 +11,7 @@ from app.schemas.stores import StoreCreateRequest, StoreResponse, StoresResponse
 from database import Base, SessionLocal,engine
 import httpx
 import uuid
+from fastapi import status
 
 router = APIRouter(prefix="/stores",tags=["stores"])
 
@@ -46,14 +47,12 @@ def read_stores(serach_name: Union[str, None] = None):
         #DB取得処理
         try:
             stores = db.execute(stmt).mappings().all()
-        except ProgrammingError as e:
-            raise HTTPException(status_code=500, detail="データベースの構造に問題があります")
-        except OperationalError as e:
-            raise HTTPException(status_code=503, detail="データベースに接続できません")
+        except OperationalError as e:   
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="データベースに接続できません")
         except IntegrityError as e:
-            raise HTTPException(status_code=400, detail="データ整合性の問題が発生しました")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="データ整合性の問題が発生しました")
         except Exception as e:
-            raise HTTPException(status_code=500, detail="サーバーエラーが発生しました")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="サーバーエラーが発生しました")
         
     return {
         "stores":humps.camelize(stores)
@@ -86,17 +85,15 @@ def read_store(store_id: str):
         #DB取得処理
         try:
             store = db.execute(stmt).mappings().first()
-        except ProgrammingError as e:
-            raise HTTPException(status_code=500, detail="データベースの構造に問題があります")
         except OperationalError as e:   
-            raise HTTPException(status_code=503, detail="データベースに接続できません")
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="データベースに接続できません")
         except IntegrityError as e:
-            raise HTTPException(status_code=400, detail="データ整合性の問題が発生しました")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="データ整合性の問題が発生しました")
         except Exception as e:
-            raise HTTPException(status_code=500, detail="サーバーエラーが発生しました")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="サーバーエラーが発生しました")
  
     if store is None:
-        raise HTTPException(status_code=404,detail="該当する店舗が存在しません")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="該当する店舗が存在しません")
         
     return humps.camelize(store)
 
@@ -117,17 +114,17 @@ async def create_store(store:StoreCreateRequest):
         resp = await client.get(url, params=params)
         resp.raise_for_status()
     
-    if resp.status_code != 200:
-        raise HTTPException(status_code=500, detail="国土地理院APIから応答がありません")
+    if resp.status_code != status.HTTP_200_OK:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="国土地理院APIから応答がありません")
     
     data = resp.json()
 
     if not data:
-        raise HTTPException(status_code=404,detail="該当する住所が見つかりません")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="該当する住所が見つかりません")
     
     geometry = data[0].get("geometry")
     if not geometry or not geometry.get("coordinates"):
-        raise HTTPException(status_code=404,detail="該当する住所が見つかりません")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="該当する住所が見つかりません")
     
     lng,lat = geometry.get("coordinates")
 
@@ -145,8 +142,12 @@ async def create_store(store:StoreCreateRequest):
             #DB取得処理
             try:
                 select_tags = db.execute(tag_stmt).mappings().all()
+            except OperationalError as e:   
+                raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="データベースに接続できません")
+            except IntegrityError as e:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="データ整合性の問題が発生しました")
             except Exception as e:
-                raise HTTPException(status_code=500, detail="サーバーエラーが発生しました")
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="サーバーエラーが発生しました")
             
             set_select_tags = {select_tag["tag_name"] for select_tag in select_tags}
 
@@ -167,8 +168,12 @@ async def create_store(store:StoreCreateRequest):
                         #タグテーブルに追加
                         insert_tag_stmt = insert(Tag).values(tags_dicts).returning(Tag.id)
                         tag_ids = db.execute(insert_tag_stmt).scalars().all()
+                    except OperationalError as e:   
+                        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="データベースに接続できません")
+                    except IntegrityError as e:
+                        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="データ整合性の問題が発生しました")
                     except Exception as e:
-                        raise HTTPException(status_code=500, detail="サーバーエラーが発生しました")    
+                        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="サーバーエラーが発生しました")
 
             store_dicts = {
                 "store_id":uuid.uuid4(),
@@ -184,8 +189,12 @@ async def create_store(store:StoreCreateRequest):
                 #店舗テーブルにデータを追加
                 insert_store_stmt = insert(Store).values(store_dicts).returning(Store.id)
                 store_id = db.execute(insert_store_stmt).scalar_one()
+            except OperationalError as e:   
+                raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="データベースに接続できません")
+            except IntegrityError as e:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="データ整合性の問題が発生しました")
             except Exception as e:
-                raise HTTPException(status_code=500, detail="サーバーエラーが発生しました")
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="サーバーエラーが発生しました")
             
             #中間テーブルにデータを追加
             if tag_ids:
@@ -200,8 +209,11 @@ async def create_store(store:StoreCreateRequest):
                 try:
                     insert_stores_tags_stmt = insert(stores_tags_table).values(stores_tags)
                     db.execute(insert_stores_tags_stmt)
+                except OperationalError as e:   
+                    raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="データベースに接続できません")
+                except IntegrityError as e:
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="データ整合性の問題が発生しました")
                 except Exception as e:
-                    print(e)
-                    raise HTTPException(status_code=500, detail="サーバーエラーが発生しました")
+                    raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="サーバーエラーが発生しました")
     
-    return Response(status_code=201)
+    return Response(status_code=status.HTTP_201_CREATED)
