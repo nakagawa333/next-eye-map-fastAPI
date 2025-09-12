@@ -12,6 +12,7 @@ from database import Base, SessionLocal,engine
 import httpx
 import uuid
 from fastapi import status
+from config.logging_config import logger
 
 router = APIRouter(prefix="/stores",tags=["stores"])
 
@@ -134,6 +135,7 @@ async def create_store(store:StoreCreateRequest):
             select_tags:List[str] = []
             tag_stmt = (
                 select(
+                    Tag.id,
                     Tag.tag_name
                 )
                 .where(Tag.tag_name.in_(store.tags))
@@ -142,14 +144,14 @@ async def create_store(store:StoreCreateRequest):
             #DB取得処理
             try:
                 select_tags = db.execute(tag_stmt).mappings().all()
-            except OperationalError as e:   
+            except OperationalError as e:
                 raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="データベースに接続できません")
             except IntegrityError as e:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="データ整合性の問題が発生しました")
             except Exception as e:
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="サーバーエラーが発生しました")
             
-            set_select_tags = {select_tag["tag_name"] for select_tag in select_tags}
+            set_select_tags = {select_tag.get("tag_name") for select_tag in select_tags}
 
             tag_ids:List[str] = []
             if store.tags:
@@ -174,6 +176,10 @@ async def create_store(store:StoreCreateRequest):
                         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="データ整合性の問題が発生しました")
                     except Exception as e:
                         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="サーバーエラーが発生しました")
+                        
+                else:
+                    #既にテーブルにデータがある場合、IDのみを取得
+                    tag_ids = [select_tag.get("id") for select_tag in select_tags]
 
             store_dicts = {
                 "store_id":uuid.uuid4(),
