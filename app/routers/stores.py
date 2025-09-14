@@ -1,6 +1,6 @@
 from logging import getLogger
 from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from typing import List, Union
 
 import humps
@@ -105,8 +105,6 @@ def read_store(store_id: UUID):
 @router.post("/")
 async def create_store(store:StoreCreateRequest):
     logger.info(f"新規店舗作成リクエスト: {store.storeName}")
-
-    #TODO 認証処理を追加 Barser
     
     params = {
         "q":store.address

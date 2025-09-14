@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 import uvicorn
 
+from app.middleware.auth import AuthMiddleware
 from app.routers import stores
 from database import Base,engine
 from config.logging_config import setup_logger
@@ -20,6 +21,9 @@ app.add_middleware(
 )
 
 app.include_router(stores.router)
+
+#ミドルウェア
+app.add_middleware(AuthMiddleware)
 
 #ログ設定
 setup_logger()
