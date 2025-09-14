@@ -1,5 +1,6 @@
 import logging
 import os
+from dotenv import load_dotenv
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi import Request
@@ -7,6 +8,8 @@ from app.config.constants import EndPoints, HttpMethod
 from fastapi import status
 
 logger = logging.getLogger("app")
+
+load_dotenv()
 EXPECTED_TOKEN = os.getenv("API_TOKEN")
 
 #ミドルウェア

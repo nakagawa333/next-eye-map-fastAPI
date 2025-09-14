@@ -186,6 +186,10 @@ async def create_store(store:StoreCreateRequest):
                 set_select_tags = {select_tag.get("tag_name") for select_tag in select_tags}
 
                 tag_ids:List[str] = []
+
+                if select_tags:
+                    tag_ids = [select_tag.get("id") for select_tag in select_tags]
+
                 if store.tags:
                     tags_values:List[Tag] = []
 
@@ -200,11 +204,9 @@ async def create_store(store:StoreCreateRequest):
                     if tags_dicts:
                         logger.info(f"新規タグ追加: {[t['tag_name'] for t in tags_dicts]}")
                         insert_tag_stmt = insert(Tag).values(tags_dicts).returning(Tag.id)
-                        tag_ids = db.execute(insert_tag_stmt).scalars().all()
-                    else:
-                        #既にテーブルにデータがある場合、IDのみを取得
-                        tag_ids = [select_tag.get("id") for select_tag in select_tags]
-                        logger.debug(f"既存タグ利用: {set_select_tags}")
+                        res_tags_ids = db.execute(insert_tag_stmt).scalars().all()
+                        if res_tags_ids:
+                            tag_ids.extend(res_tags_ids)
 
                 store_dicts = {
                     "store_id":uuid.uuid4(),
