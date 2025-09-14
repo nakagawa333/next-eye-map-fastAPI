@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from typing import List, Union
 
 import humps
+from app.config.constants import GSIAPI
 from app.models.stores_tags_table import stores_tags_table
 from sqlalchemy import func, insert, literal, select
 from app.models.store import Store
@@ -16,7 +17,7 @@ import uuid
 from fastapi import status
 from config.logging_config import setup_logger
 from uuid import UUID
-
+import traceback
 
 router = APIRouter(prefix="/stores",tags=["stores"])
 
@@ -106,10 +107,7 @@ async def create_store(store:StoreCreateRequest):
     logger.info(f"新規店舗作成リクエスト: {store.storeName}")
 
     #TODO 認証処理を追加 Barser
-
-    #国土地理院のAPIのURL
-    url:str = f"https://msearch.gsi.go.jp/address-search/AddressSearch"
-
+    
     params = {
         "q":store.address
     }
@@ -119,15 +117,26 @@ async def create_store(store:StoreCreateRequest):
             logger.info(f"国土地理院APIへのリクエスト開始: {store.storeName}")
 
             #国土地理院のAPIから緯度と経度を取得
-            resp = await client.get(url, params=params)
+            resp = await client.get(
+                url=GSIAPI.ADDRESS_SEARCH, 
+                params=params,
+                timeout=GSIAPI.TIMEOUT
+            )
             resp.raise_for_status()
             logger.info(f"国土地理院APIへのリクエスト終了 ステータス {resp.status_code}")
 
     except httpx.RequestError as e:
-        logger.error(f"ネットワーク接続に失敗: {e}")
+        logger.error(f"ネットワーク接続に失敗: \n{traceback.format_exc()}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="国土地理院APIから応答がありません")
+
     except httpx.HTTPStatusError as e:
-        logger.error(f"HTTPステータスエラー: {e.response.status_code}")
+        logger.error(f"HTTPステータスエラー: \n{traceback.format_exc()}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="国土地理院APIから応答がありません")
     
+    except Exception as e:
+        logger.error(f"サーバーエラー: \n{traceback.format_exc()}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="国土地理院APIへのリクエストが失敗しました")
+
     if resp.status_code != status.HTTP_200_OK:
         logger.error("国土地理院APIから応答がありません")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="国土地理院APIから応答がありません")
@@ -135,12 +144,12 @@ async def create_store(store:StoreCreateRequest):
     data = resp.json()
 
     if not data:
-        logger.error("該当する住所が見つかりません")
+        logger.warning(f"該当する住所が存在しませんでした:{store.address}")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="該当する住所が見つかりません")
     
     geometry = data[0].get("geometry")
     if not geometry or not geometry.get("coordinates"):
-        logger.error("該当する住所が見つかりません")
+        logger.warning(f"該当する住所が存在しませんでした:{store.address}")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="該当する住所が見つかりません")
     
     lng,lat = geometry.get("coordinates")
