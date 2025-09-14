@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from typing import List, Union
 
 import humps
-from app.config.constants import GSIAPI
+from app.config.constants import GSIAPI, EndPoints
 from app.models.stores_tags_table import stores_tags_table
 from sqlalchemy import func, insert, literal, select
 from app.models.store import Store
@@ -19,12 +19,12 @@ from config.logging_config import setup_logger
 from uuid import UUID
 import traceback
 
-router = APIRouter(prefix="/stores",tags=["stores"])
+router = APIRouter(prefix=EndPoints.STORES,tags=["stores"])
 
 logger = getLogger("app")
 
 @router.get("/",response_model=StoresResponse)
-def read_stores(serach_name: Union[str, None] = None):
+def read_stores(serach_name: Union[str, None] = None,tag_name: Union[str, None] = None):
     logger.info(f"店舗一覧取得リクエスト")
 
     with SessionLocal() as db:
@@ -41,17 +41,30 @@ def read_stores(serach_name: Union[str, None] = None):
                         func.array_agg(Tag.tag_name).filter(Tag.tag_name != None),
                         literal([])
                     ).label("tags")
-                )   
+                )
                 .outerjoin(stores_tags_table, stores_tags_table.c.store_id == Store.id)
                 .outerjoin(Tag, stores_tags_table.c.tag_id == Tag.id)
                 .group_by(Store.id)
             )
+
+            #検索条件リスト
+            conditions:List[str] = []
             
             #検索文字あり   
             if serach_name:
-                stmt = stmt.where(
-                    Store.store_name.ilike(f"%{serach_name}%")
+                conditions.append(Store.store_name.ilike(f"%{serach_name}%"))
+
+            if tag_name:
+                subquery = (
+                    select(stores_tags_table.c.store_id)
+                    .join(Tag, stores_tags_table.c.tag_id == Tag.id)
+                    .where(Tag.tag_name == tag_name)
                 )
+                conditions.append(Store.id.in_(subquery))
+
+            #検索条件が指定されている場合、where句に条件を追加
+            if conditions:
+                stmt = stmt.where(*conditions)
 
             stores = db.execute(stmt).mappings().all()
         except Exception as e:
