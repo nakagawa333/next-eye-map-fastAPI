@@ -23,8 +23,19 @@ router = APIRouter(prefix=EndPoints.STORES,tags=["stores"])
 
 logger = getLogger("app")
 
+# GETで店舗一覧を取得
 @router.get("/",response_model=StoresResponse)
 def read_stores(serach_name: Union[str, None] = None,tag_name: Union[str, None] = None):
+    """
+    店舗一覧を取得する
+
+    Args:
+        serach_name (Union[str, None], optional): 検索文字
+        tag_name (Union[str, None], optional): タグ名
+
+    Returns:
+        _type_: 複数店舗レスポンスモデル
+    """
 
     logger.info(f"店舗一覧取得リクエスト")
 
@@ -78,8 +89,22 @@ def read_stores(serach_name: Union[str, None] = None,tag_name: Union[str, None] 
         "stores":humps.camelize(stores)
     }
 
+# GETで特定の店舗を取得
 @router.get("/{store_id}", response_model=StoreResponse)
 def read_store(store_id: UUID):
+    """
+    指定した店舗IDの情報を取得する
+    
+    Args:
+        store_id (UUID): 取得対象の店舗ID
+
+    Raises:
+        HTTPException: 店舗が存在しない場合 (404 Not Found)
+
+    Returns:
+        _type_: 単一店舗レスポンスモデル
+    """
+
     logger.info(f"店舗取得リクエスト: {store_id}")
 
     with SessionLocal() as db:
@@ -116,8 +141,26 @@ def read_store(store_id: UUID):
         
     return humps.camelize(store)
 
+# POSTで店舗を作成
 @router.post("/")
 async def create_store(store:StoreCreateRequest):
+    """
+    新しい店舗情報を登録する
+
+    Args:
+        store (StoreCreateRequest): 店舗作成用のリクエストモデル
+
+    Raises:
+        HTTPException: 国土地理院APIに接続できない場合 (400 Bad Request)
+        HTTPException: 国土地理院APIが不正なステータスコードを返した場合 (400 Bad Request)
+        HTTPException: 国土地理院APIへのリクエストが失敗した場合 (500 Internal Server Error)
+        HTTPException: 指定した住所が存在しない場合 (404 Not Found)
+        HTTPException: DB処理に失敗した場合 (500 Internal Server Error)
+
+    Returns:
+        Response: ステータスコード201を返却（店舗登録成功時）
+    """
+
     logger.info(f"新規店舗作成リクエスト: {store.storeName}")
     
     params = {
@@ -248,8 +291,20 @@ async def create_store(store:StoreCreateRequest):
 
     return Response(status_code=status.HTTP_201_CREATED)
 
+# DELETEで店舗を作成
 @router.delete("/")
 def delete_store(store_id: UUID):
+    """
+    店舗情報を削除する
+    Args:
+        store_id (UUID): 店舗ID
+
+    Raises:
+        HTTPException: 店舗が存在しない場合 (404 Not Found)
+
+    Returns:
+       Response: ステータスコード204を返却（店舗削除成功時）
+    """
     logger.info(f"店舗削除リクエスト: {store_id}")
 
     with SessionLocal() as db:

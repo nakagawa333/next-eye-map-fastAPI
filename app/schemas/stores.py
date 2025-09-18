@@ -4,6 +4,7 @@ from typing import List, Optional
 
 from uuid import UUID
 
+"""単一店舗レスポンスモデル"""
 class StoreResponse(BaseModel):
     storeId: UUID
     storeName: str
@@ -18,7 +19,7 @@ class StoreResponse(BaseModel):
         alias_generator = humps.camelize
         allow_population_by_field_name = True
 
-
+"""複数店舗レスポンスモデル"""
 class StoresResponse(BaseModel):
     stores:List[StoreResponse]
     class Config:
@@ -26,6 +27,7 @@ class StoresResponse(BaseModel):
         alias_generator = humps.camelize
         allow_population_by_field_name = True
 
+"""店舗作成リクエストモデル"""
 class StoreCreateRequest(BaseModel):
     storeName: str = Field(min_length=1,max_length=100)
     address: str = Field(min_length=1,max_length=100)
