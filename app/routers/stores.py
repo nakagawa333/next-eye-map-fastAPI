@@ -6,7 +6,7 @@ from typing import List, Union
 import humps
 from app.config.constants import GSIAPI, EndPoints
 from app.models.stores_tags_table import stores_tags_table
-from sqlalchemy import func, insert, literal, select
+from sqlalchemy import delete, func, insert, literal, select
 from app.models.store import Store
 from app.models.tag import Tag
 from app.schemas.stores import StoreCreateRequest, StoreResponse, StoresResponse
@@ -25,6 +25,7 @@ logger = getLogger("app")
 
 @router.get("/",response_model=StoresResponse)
 def read_stores(serach_name: Union[str, None] = None,tag_name: Union[str, None] = None):
+
     logger.info(f"店舗一覧取得リクエスト")
 
     with SessionLocal() as db:
@@ -76,7 +77,7 @@ def read_stores(serach_name: Union[str, None] = None,tag_name: Union[str, None] 
     return {
         "stores":humps.camelize(stores)
     }
-    
+
 @router.get("/{store_id}", response_model=StoreResponse)
 def read_store(store_id: UUID):
     logger.info(f"店舗取得リクエスト: {store_id}")
@@ -246,3 +247,43 @@ async def create_store(store:StoreCreateRequest):
         logger.info("トランザクション終了")
 
     return Response(status_code=status.HTTP_201_CREATED)
+
+@router.delete("/")
+def delete_store(store_id: UUID):
+    logger.info(f"店舗削除リクエスト: {store_id}")
+
+    with SessionLocal() as db:
+        logger.info("トランザクション開始")
+
+        try:
+            with db.begin():
+                store_stmt = (
+                    select(
+                        Store.id
+                    )
+                    .where(Store.store_id == store_id)
+                )
+
+                select_store_id = db.execute(store_stmt).scalar()
+
+                if not select_store_id:
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="店舗が存在しません")
+
+                #中間テーブル削除
+                delete_stmt = delete(stores_tags_table).where(stores_tags_table.c.store_id == select_store_id)
+                db.execute(delete_stmt)
+                
+                logger.debug(f"中間テーブル削除成功: {store_id}")
+
+                #店舗を削除
+                delete_store_stmt = delete(Store).where(Store.store_id == store_id)
+                db.execute(delete_store_stmt)
+                logger.info(f"店舗削除成功: {store_id}")
+
+        except Exception as e:
+            logger.error("トランザクション失敗")
+            handle_db_exception(e)
+
+        logger.info("トランザクション終了")
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+                
