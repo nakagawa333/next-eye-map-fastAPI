@@ -1,6 +1,6 @@
 from logging import getLogger
 from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from typing import List, Union
 
 import humps
@@ -25,7 +25,7 @@ logger = getLogger("app")
 
 # GETで店舗一覧を取得
 @router.get("/",response_model=StoresResponse)
-def read_stores(serach_name: Union[str, None] = None,tag_name: Union[str, None] = None):
+def read_stores(serach_name: Union[str] = Query(None,max_length=100),tag_name: Union[str] = Query(None,max_length=100)):
     """
     店舗一覧を取得する
 
