@@ -6,10 +6,11 @@ from typing import List, Union
 import humps
 from app.config.constants import GSIAPI, EndPoints
 from app.models.stores_tags_table import stores_tags_table
-from sqlalchemy import delete, func, insert, literal, select
+from sqlalchemy import delete, func, insert, literal, select, update
 from app.models.store import Store
 from app.models.tag import Tag
-from app.schemas.stores import StoreCreateRequest, StoreResponse, StoresResponse
+from app.schemas.stores import StoreCreateRequest, StoreResponse, StoreUpdateRequest, StoresResponse
+from app.services.gsi_api import fetch_coordinates_from_gsi
 from app.utils.db_exceptions import handle_db_exception
 from database import Base, SessionLocal,engine
 import httpx
@@ -341,4 +342,177 @@ def delete_store(store_id: UUID):
 
         logger.info("トランザクション終了")
         return Response(status_code=status.HTTP_204_NO_CONTENT)
+    
+@router.patch("/")
+async def update_store(store:StoreUpdateRequest):
+    """
+    店舗情報を更新するAPI
+
+    Args:
+        store (StoreUpdateRequest): 店舗更新リクエストモデル
+
+    Raises:
+        HTTPException: 国土地理院APIが応答しない場合
+        HTTPException: 指定住所が存在しない場合
+        HTTPException: 該当店舗が存在しない場合
+        HTTPException: データベース例外（整合性・接続等）が発生した場合
+
+    Returns:
+        Response: HTTP 204 NO CONTENT（更新成功）
+    """
+
+    update_values = {}
+    #リクエストに店舗名が含まれている場合
+    if store.storeName is not None:
+        update_values["store_name"] = store.storeName
+
+    #リクエストに住所が含まれている場合
+    if store.address is not None:
+        params = {
+            "q":store.address
+        }
+
+        try:
+            #国土地理院のAPIから緯度と経度を取得
+            resp = await fetch_coordinates_from_gsi(params)
+        except httpx.RequestError as e:
+            logger.error(f"ネットワーク接続に失敗: \n{traceback.format_exc()}")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="国土地理院APIから応答がありません")
+
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTPステータスエラー: \n{traceback.format_exc()}")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="国土地理院APIから応答がありません")
+        
+        except Exception as e:
+            logger.error(f"サーバーエラー: \n{traceback.format_exc()}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="国土地理院APIへのリクエストが失敗しました")
+
+        if resp.status_code != status.HTTP_200_OK:
+            logger.error("国土地理院APIから応答がありません")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="国土地理院APIから応答がありません")
+        
+        data = resp.json()
+        #有効な住所でない場合
+        if not data:
+            logger.warning(f"該当する住所が存在しませんでした:{store.address}")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="該当する住所が見つかりません")
+        
+        update_values["address"] = store.address
+
+    if store.content is not None:
+        update_values["content"] = store.content
+
+    with SessionLocal() as db:
+        try:
+            with db.begin():
+
+                #店舗名、住所、内容が更新される場合、DBを更新
+                if update_values:
+                    update_stmt = update(Store).where(Store.store_id == store.storeId).values(update_values)
+                    db.execute(update_stmt)
+
+                store_stmt = (
+                    select(
+                        Store.id
+                    )
+                    .where(Store.store_id == store.storeId)                    
+                )
+
+                #店舗IDからPKを取得
+                select_store_id = db.execute(store_stmt).scalar()
+
+                if not select_store_id:
+                    logger.info(f"該当する店舗が存在しませんでした:{store.storeId}")
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="店舗が存在しません")
+                
+                select_stores_tags_stmt = (
+                    select(
+                        stores_tags_table.c.stores_tags_id,
+                        Tag.tag_name,
+                    )
+                    .select_from(stores_tags_table)
+                    .where(stores_tags_table.c.store_id == select_store_id)
+                    .outerjoin(Tag, stores_tags_table.c.tag_id == Tag.id)
+                )
+
+                logger.info("店舗情報の取得開始")
+                select_stores_tags = db.execute(select_stores_tags_stmt).mappings().all()
+                logger.info("店舗情報の取得完了")
+
+                select_stores_tags_objs = {
+
+                }
+                for select_stores_tag in select_stores_tags:
+                    tag_name = select_stores_tag.get("tag_name")
+                    select_stores_tags_objs[tag_name] = select_stores_tag
+                    
+                if store.tags:
+                    tags:set[str] = set(store.tags)
+                    if select_stores_tags_objs:
+                        select_stores_tags_names = set(select_stores_tags_objs.keys())
+                        #削除するタグ名
+                        delete_tags_names = select_stores_tags_names - tags
+                        #追加するタグ名
+                        add_tags_names = tags - select_stores_tags_names
+
+                        if delete_tags_names:
+                            select_stores_tags_ids = []
+                            
+                            for delete_tags_name in delete_tags_names:
+                                select_stores_tags_obj = select_stores_tags_objs.get(delete_tags_name)
+                                if select_stores_tags_obj:
+                                    select_stores_tags_ids.append(select_stores_tags_obj.get("stores_tags_id"))
+
+                            #差分のあるタグを削除
+                            delete_stores_tags_stmt = delete(stores_tags_table).where(stores_tags_table.c.stores_tags_id.in_(select_stores_tags_ids))
+                            db.execute(delete_stores_tags_stmt)
+                        if add_tags_names:
+                            tags_stmt = (
+                                select(
+                                    Tag.tag_name,
+                                    Tag.id
+                            )
+                                .where(Tag.tag_name.in_(add_tags_names))                    
+                            )
+
+                            select_tags = db.execute(tags_stmt).mappings().all()
+
+                            #タグテーブルに存在しない場合、追加
+                            if not select_tags:
+                                tags_dicts = []
+                                for add_tags_name in add_tags_names:
+                                    tags_dict = {
+                                        "tag_id":uuid.uuid4(),
+                                        "tag_name":add_tags_name
+                                    }
+                                    tags_dicts.append(tags_dict)
+
+                                logger.info("新規タグ作成開始")
+                                insert_tag_stmt = insert(Tag).values(tags_dicts).returning(Tag.id,Tag.tag_name)
+                                res_tags = db.execute(insert_tag_stmt).mappings().all()
+                                logger.info("新規タグ作成完了")
+                                select_tags.extend(res_tags)
+
+                            if select_tags:
+                                stores_tags_table_dicts = []
+                                for select_tag in select_tags:
+                                    stores_tags_table_dict = {
+                                        "stores_tags_id":uuid.uuid4(),
+                                        "store_id":select_store_id,
+                                        "tag_id":select_tag.get("id")
+                                    }
+
+                                    stores_tags_table_dicts.append(stores_tags_table_dict)
+
+                                logger.info("中間テーブル更新開始")
+                                insert_stores_tags_table_stmt = insert(stores_tags_table).values(stores_tags_table_dicts)
+                                db.execute(insert_stores_tags_table_stmt)
+                                logger.info("中間テーブル更新成功")
+
+        except Exception as e:
+            logger.error("トランザクション失敗")
+            handle_db_exception(e)
+
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
                 

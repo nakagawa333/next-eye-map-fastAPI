@@ -1,8 +1,11 @@
 import humps
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, constr
 from typing import List, Optional
 
 from uuid import UUID
+
+NonEmptyStr = constr(strip_whitespace=True, min_length=1,max_length=100)
+
 
 """単一店舗レスポンスモデル"""
 class StoreResponse(BaseModel):
@@ -33,3 +36,11 @@ class StoreCreateRequest(BaseModel):
     address: str = Field(min_length=1,max_length=100)
     content: str = Field(min_length=1,max_length=100)
     tags:List[str] = Field(min_length=1,max_length=100)
+
+"""店舗更新リクエストモデル"""
+class StoreUpdateRequest(BaseModel):
+    storeId: UUID
+    storeName: Optional[NonEmptyStr] = None
+    address: Optional[NonEmptyStr] = None
+    content: Optional[NonEmptyStr] = None
+    tags: Optional[List[NonEmptyStr]] = None
