@@ -15,7 +15,8 @@ EXPECTED_TOKEN = os.getenv("API_TOKEN")
 #ミドルウェア
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self,request:Request,call_next):
-        if request.url.path.startswith(EndPoints.STORES) and request.method == HttpMethod.POST:
+        auth_http_methods = {HttpMethod.POST,HttpMethod.PATCH,HttpMethod.DELETE}
+        if request.url.path.startswith(EndPoints.STORES) and request.method in auth_http_methods:
             logger.info(f"認証開始: path={request.url.path}, method={request.method}, client={request.client.host}")
             #Authorizationヘッダー取得
             token:str = request.headers.get("Authorization")
