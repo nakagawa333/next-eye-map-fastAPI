@@ -169,18 +169,8 @@ async def create_store(store:StoreCreateRequest):
     }
 
     try:
-        async with httpx.AsyncClient() as client:
-            logger.info(f"国土地理院APIへのリクエスト開始: {store.storeName}")
-
-            #国土地理院のAPIから緯度と経度を取得
-            resp = await client.get(
-                url=GSIAPI.ADDRESS_SEARCH, 
-                params=params,
-                timeout=GSIAPI.TIMEOUT
-            )
-            resp.raise_for_status()
-            logger.info(f"国土地理院APIへのリクエスト終了 ステータス {resp.status_code}")
-
+        #国土地理院のAPIから緯度と経度を取得
+        resp = await fetch_coordinates_from_gsi(params)
     except httpx.RequestError as e:
         logger.error(f"ネットワーク接続に失敗: \n{traceback.format_exc()}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="国土地理院APIから応答がありません")
@@ -208,8 +198,10 @@ async def create_store(store:StoreCreateRequest):
         logger.warning(f"該当する住所が存在しませんでした:{store.address}")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="該当する住所が見つかりません")
     
+    #緯度、経度
     lng,lat = geometry.get("coordinates")
 
+    #DBセッション開始
     with SessionLocal() as db:
         logger.info("トランザクション開始")
 
@@ -402,6 +394,7 @@ async def update_store(store:StoreUpdateRequest):
     if store.content is not None:
         update_values["content"] = store.content
 
+    #DBセッション開始
     with SessionLocal() as db:
         try:
             with db.begin():
@@ -425,6 +418,7 @@ async def update_store(store:StoreUpdateRequest):
                     logger.info(f"該当する店舗が存在しませんでした:{store.storeId}")
                     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="店舗が存在しません")
                 
+                #既存タグの取得
                 select_stores_tags_stmt = (
                     select(
                         stores_tags_table.c.stores_tags_id,
@@ -439,13 +433,15 @@ async def update_store(store:StoreUpdateRequest):
                 select_stores_tags = db.execute(select_stores_tags_stmt).mappings().all()
                 logger.info("店舗情報の取得完了")
 
+                # 辞書形式で整理 {tag_name: {stores_tags_id, tag_name}}
                 select_stores_tags_objs = {
 
                 }
                 for select_stores_tag in select_stores_tags:
                     tag_name = select_stores_tag.get("tag_name")
                     select_stores_tags_objs[tag_name] = select_stores_tag
-                    
+
+                #タグの差分更新
                 if store.tags:
                     tags:set[str] = set(store.tags)
                     if select_stores_tags_objs:
@@ -455,6 +451,7 @@ async def update_store(store:StoreUpdateRequest):
                         #追加するタグ名
                         add_tags_names = tags - select_stores_tags_names
 
+                        #削除処理
                         if delete_tags_names:
                             select_stores_tags_ids = []
                             
@@ -466,6 +463,8 @@ async def update_store(store:StoreUpdateRequest):
                             #差分のあるタグを削除
                             delete_stores_tags_stmt = delete(stores_tags_table).where(stores_tags_table.c.stores_tags_id.in_(select_stores_tags_ids))
                             db.execute(delete_stores_tags_stmt)
+                        
+                        #追加処理
                         if add_tags_names:
                             tags_stmt = (
                                 select(
@@ -493,6 +492,7 @@ async def update_store(store:StoreUpdateRequest):
                                 logger.info("新規タグ作成完了")
                                 select_tags.extend(res_tags)
 
+                            # 中間テーブルに追加（空リスト防止のためチェック）
                             if select_tags:
                                 stores_tags_table_dicts = []
                                 for select_tag in select_tags:
