@@ -138,7 +138,7 @@ def read_store(store_id: UUID):
  
     if store is None:
         logger.warning(f"該当する店舗が存在しませんでした:{store_id}")
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="該当する店舗が存在しません")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="該当する店舗が存在しませんでした")
         
     return humps.camelize(store)
 
@@ -315,7 +315,7 @@ def delete_store(store_id: UUID):
                 select_store_id = db.execute(store_stmt).scalar()
 
                 if not select_store_id:
-                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="店舗が存在しません")
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="該当する店舗が存在しませんでした")
 
                 #中間テーブル削除
                 delete_stmt = delete(stores_tags_table).where(stores_tags_table.c.store_id == select_store_id)
@@ -416,7 +416,7 @@ async def update_store(store:StoreUpdateRequest):
 
                 if not select_store_id:
                     logger.info(f"該当する店舗が存在しませんでした:{store.storeId}")
-                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="店舗が存在しません")
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="該当する店舗が存在しませんでした")
                 
                 #既存タグの取得
                 select_stores_tags_stmt = (

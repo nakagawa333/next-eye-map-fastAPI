@@ -14,6 +14,9 @@ def handle_db_exception(exc):
     elif isinstance(exc, IntegrityError):
         logger.error(f"データ整合性の問題:\n{traceback.format_exc()}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="データ整合性の問題が発生しました")
+    elif isinstance(exc, HTTPException):
+        logger.error(f"データ未存在:\n{traceback.format_exc()}")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=exc.detail)
     else:
         logger.error(f"サーバーエラー:\n{traceback.format_exc()}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="サーバーエラーが発生しました")
