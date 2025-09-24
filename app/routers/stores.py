@@ -1,24 +1,26 @@
+import traceback
+import uuid
 from logging import getLogger
-from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from typing import List, Union
+from uuid import UUID
 
+import httpx
 import humps
-from app.config.constants import GSIAPI, EndPoints
-from app.models.stores_tags_table import stores_tags_table
+from fastapi import (APIRouter, Depends, HTTPException, Query, Request,
+                     Response, status)
 from sqlalchemy import delete, func, insert, literal, select, update
+from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
+
+from app.config.constants import GSIAPI, EndPoints
 from app.models.store import Store
+from app.models.stores_tags_table import stores_tags_table
 from app.models.tag import Tag
-from app.schemas.stores import StoreCreateRequest, StoreResponse, StoreUpdateRequest, StoresResponse
+from app.schemas.stores import (StoreCreateRequest, StoreResponse,
+                                StoresResponse, StoreUpdateRequest)
 from app.services.gsi_api import fetch_coordinates_from_gsi
 from app.utils.db_exceptions import handle_db_exception
-from database import Base, SessionLocal,engine
-import httpx
-import uuid
-from fastapi import status
 from config.logging_config import setup_logger
-from uuid import UUID
-import traceback
+from database import Base, SessionLocal, engine
 
 router = APIRouter(prefix=EndPoints.STORES,tags=["stores"])
 
@@ -171,21 +173,12 @@ async def create_store(store:StoreCreateRequest):
     try:
         #国土地理院のAPIから緯度と経度を取得
         resp = await fetch_coordinates_from_gsi(params)
-    except httpx.RequestError as e:
-        logger.error(f"ネットワーク接続に失敗: \n{traceback.format_exc()}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="国土地理院APIから応答がありません")
-
-    except httpx.HTTPStatusError as e:
-        logger.error(f"HTTPステータスエラー: \n{traceback.format_exc()}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="国土地理院APIから応答がありません")
-    
+        data = resp.json()
+    except HTTPException as e:
+        raise e
     except Exception as e:
-        logger.error(f"サーバーエラー: \n{traceback.format_exc()}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="国土地理院APIへのリクエストが失敗しました")
-
-    if resp.status_code != status.HTTP_200_OK:
-        logger.error("国土地理院APIから応答がありません")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="国土地理院APIから応答がありません")
+        logger.exception("外部API呼び出し失敗")
+        raise HTTPException(status_code=500, detail="サーバー内部エラー")
     
     data = resp.json()
 
@@ -364,32 +357,28 @@ async def update_store(store:StoreUpdateRequest):
             "q":store.address
         }
 
-        try:
-            #国土地理院のAPIから緯度と経度を取得
-            resp = await fetch_coordinates_from_gsi(params)
-        except httpx.RequestError as e:
-            logger.error(f"ネットワーク接続に失敗: \n{traceback.format_exc()}")
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="国土地理院APIから応答がありません")
-
-        except httpx.HTTPStatusError as e:
-            logger.error(f"HTTPステータスエラー: \n{traceback.format_exc()}")
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="国土地理院APIから応答がありません")
-        
-        except Exception as e:
-            logger.error(f"サーバーエラー: \n{traceback.format_exc()}")
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="国土地理院APIへのリクエストが失敗しました")
-
-        if resp.status_code != status.HTTP_200_OK:
-            logger.error("国土地理院APIから応答がありません")
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="国土地理院APIから応答がありません")
-        
+    try:
+        #国土地理院のAPIから緯度と経度を取得
+        resp = await fetch_coordinates_from_gsi(params)
         data = resp.json()
-        #有効な住所でない場合
-        if not data:
-            logger.warning(f"該当する住所が存在しませんでした:{store.address}")
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="該当する住所が見つかりません")
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logger.exception("外部API呼び出し失敗")
+        raise HTTPException(status_code=500, detail="サーバー内部エラー")
+    
+    data = resp.json()
+
+    if not data:
+        logger.warning(f"該当する住所が存在しませんでした:{store.address}")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="該当する住所が見つかりません")
+    
+    geometry = data[0].get("geometry")
+    if not geometry or not geometry.get("coordinates"):
+        logger.warning(f"該当する住所が存在しませんでした:{store.address}")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="該当する住所が見つかりません")
         
-        update_values["address"] = store.address
+    update_values["address"] = store.address
 
     if store.content is not None:
         update_values["content"] = store.content
