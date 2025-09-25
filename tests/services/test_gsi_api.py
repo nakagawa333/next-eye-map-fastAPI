@@ -38,7 +38,7 @@ async def test_fetch_coordinates_from_gsi_success():
     assert json_data == [{"geometry": {"coordinates": [139.7, 35.6]}}]
 
 @pytest.mark.asyncio
-async def tets_fetch_coordinates_from_gsi_http_status_error():
+async def test_fetch_coordinates_from_gsi_http_status_error():
     """国土地理院APIからの座標取得失敗テスト（HTTPエラー）"""
     mock_response = MagicMock()
 
