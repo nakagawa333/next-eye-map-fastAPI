@@ -7,3 +7,7 @@ psycopg2==2.9.10
 pyhumps==3.8.0
 debugpy==1.8.16
 pydantic-i18n==0.4.5
+pytest==8.2.0
+pytest-asyncio==1.2.0
+pytest-cov==7.0.0
+pytest-postgresql==7.0.2
