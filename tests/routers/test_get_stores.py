@@ -1,13 +1,15 @@
 import os
 import uuid
+from unittest.mock import MagicMock
 
 import pytest
 import requests
 from dotenv import load_dotenv
-from fastapi import Depends
+from fastapi import Depends, HTTPException, status
 from fastapi.testclient import TestClient
 from pytest_postgresql import factories
 from sqlalchemy import create_engine, delete, insert
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 from app.main import app
@@ -131,7 +133,13 @@ def sample_stores():
         db.execute(insert_stores_tags_stmt)
         db.commit()
 
-# TODO テスト時とPostmanでリクエスト時に動的にDBの接続先を変えれるように修正
+@pytest.fixture(autouse=True)
+def clean_app_dependency():
+    # テスト前
+    yield
+    # テスト後（リセット）
+    app.dependency_overrides.clear()
+
 @pytest.mark.asyncio
 def test_success(test_setup,sample_stores):
     path = "/stores"
@@ -174,7 +182,7 @@ def test_success(test_setup,sample_stores):
         pytest.param("serach_name", "store1", id="正常系")
     ]
 )
-def test_success_filter(key,value,test_setup,sample_stores):
+def test_success_search_name_filter(key,value,test_setup,sample_stores):
     path = f"/stores?{key}={value}"
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
 
@@ -199,6 +207,97 @@ def test_success_filter(key,value,test_setup,sample_stores):
 
     assert response.status_code == 200
     assert response_json == expected_response
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        pytest.param("tag_name", "タグ2", id="正常系")
+    ]
+)
+def test_success_tag_name_filter(key,value,test_setup,sample_stores):
+    path = f"/stores?{key}={value}"
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+
+    #期待値
+    expected_response = {
+        "stores": [
+            {
+                "storeId": "22222222-2222-2222-2222-222222222222",
+                "storeName": "store2",
+                "address": "住所2",
+                "content": "内容2",
+                "lat": 20.0,
+                "lng": 15.0,
+                "tags":["タグ2"]
+            }
+        ]
+    }
+
+    with TestClient(app) as client:
+        response = client.get(path, headers=headers)
+        response_json = response.json()
+
+    assert response.status_code == 200
+    assert response_json == expected_response
+
+@pytest.fixture
+def mock_db_exception():
+    def _mock(exc_class,**kwarges):
+        mock_db = MagicMock()
+        mock_db.execute.side_effect = exc_class(**kwarges)
+
+        class MockSession:
+            def execute(self,*args,**kwargs):
+                return mock_db.execute(*args,**kwargs)
+            
+        app.dependency_overrides[get_db] = lambda: MockSession()
+        return MockSession
+    return _mock
+
+@pytest.mark.parametrize(
+    "exc_class,kwargs,status_code,detail",
+    [
+        pytest.param(OperationalError,{"statement":"SELECT 1","params":None,"orig":Exception("DB接続失敗")},503,"データベースに接続できません",id="OperationalError"),
+        pytest.param(IntegrityError,{"statement":"INSERT INTO ...","params":None,"orig":Exception("データ整合性の問題")},400,"データ整合性の問題が発生しました",id="IntegrityError"),
+        pytest.param(HTTPException,{"status_code":404,"detail":"データ整合性に失敗","headers":None},404,"データ整合性に失敗",id="HTTPException"),
+    ]
+)
+def test_db_exceptions(exc_class,kwargs,status_code,detail,test_setup,mock_db_exception):
+    mock_db_exception(exc_class,**kwargs)
+    with TestClient(app) as client:
+        response = client.get("/stores")
+        assert response.status_code == status_code
+        assert response.json() == {"detail":detail}
+
+def test_db_error(test_setup,clean_app_dependency):
+    mock_db = MagicMock()
+    mock_db.execute.side_effect = Exception("例外が発生")
+
+    def mock_execute(*args, **kwargs):
+        operational_error = mock_db.execute.side_effect = Exception("例外が発生")
+        raise operational_error
+
+    # --- ② FastAPIの依存関係 get_db をモック ---
+    class MockSession:
+        def execute(self, *args, **kwargs):
+            return mock_execute()
+
+    def override_get_db():
+        yield MockSession()
+
+    app.dependency_overrides = { }
+    app.dependency_overrides[get_db] = override_get_db
+
+    with TestClient(app) as client:
+        response = client.get("/stores")
+
+    assert response.status_code == 500
+
+    expected_response = {
+        "detail":"サーバーエラーが発生しました"
+    }
+
+    assert response.json() == expected_response
 
 @pytest.mark.parametrize(
     "serach_name,tag_name,expected_port",
